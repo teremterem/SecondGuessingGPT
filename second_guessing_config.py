@@ -1,9 +1,12 @@
 """Configuration for the SecondGuessingGPT project."""
+# pylint: disable=wrong-import-position
 import os
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+import promptlayer
 
 DJANGO_SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
@@ -21,3 +24,5 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 # TODO For debug mode support a list of bots in .env that are allowed to be activated via webhooks.
 #  This is necessary because sometimes it might make sense to play with production db locally and we don't want to
 #  suddenly repoint all the production bots to the local server.
+
+pl_async_openai_client = promptlayer.openai.AsyncOpenAI()

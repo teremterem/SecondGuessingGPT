@@ -4,10 +4,10 @@ This module is used to define the views for the second_guessing_app.
 import asyncio
 import json
 import logging
-from pprint import pprint
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseServerError
 
+from second_guessing_app.second_guessing_bot import handle_telegram_update
 from second_guessing_app.second_guessing_utils import csrf_exempt_async
 from second_guessing_config import TELEGRAM_WEBHOOK_TOKEN
 
@@ -29,10 +29,7 @@ async def telegram_webhook(request: HttpRequest) -> HttpResponse:
         async def _process_update() -> None:
             try:
                 tg_update_dict = json.loads(request.body)
-                print()
-                pprint(tg_update_dict)
-                print()
-                # TODO Oleksandr: await handle_telegram_update(tg_update_dict, bot)
+                await handle_telegram_update(tg_update_dict)
             except Exception as exc1:  # pylint: disable=broad-exception-caught
                 logger.exception("ERROR WHILE PROCESSING UPDATE (level 1): %s\n\n%s\n\n", exc1, request.body)
 
