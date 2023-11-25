@@ -50,6 +50,7 @@ charset-normalizer==3.3.2
     #   requests
 click==8.1.7
     # via
+    #   -c requirements.txt
     #   black
     #   pip-tools
 comm==0.2.0
@@ -187,7 +188,7 @@ parso==0.8.3
     # via jedi
 pathspec==0.11.2
     # via black
-pexpect==4.8.0
+pexpect==4.9.0
     # via ipython
 pip-tools==7.3.0
     # via -r dev-requirements.in

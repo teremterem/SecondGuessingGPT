@@ -21,16 +21,22 @@ certifi==2023.11.17
     #   requests
 charset-normalizer==3.3.2
     # via requests
+click==8.1.7
+    # via uvicorn
 distro==1.8.0
     # via openai
 django==4.2.7
     # via -r requirements.in
 h11==0.14.0
-    # via httpcore
+    # via
+    #   httpcore
+    #   uvicorn
 httpcore==1.0.2
     # via httpx
 httpx==0.25.2
-    # via openai
+    # via
+    #   openai
+    #   python-telegram-bot
 idna==3.5
     # via
     #   anyio
@@ -47,6 +53,8 @@ pydantic==2.5.2
 pydantic-core==2.14.5
     # via pydantic
 python-dotenv==1.0.0
+    # via -r requirements.in
+python-telegram-bot==20.6
     # via -r requirements.in
 requests==2.31.0
     # via promptlayer
@@ -65,3 +73,5 @@ typing-extensions==4.8.0
     #   pydantic-core
 urllib3==2.1.0
     # via requests
+uvicorn==0.24.0.post1
+    # via -r requirements.in
