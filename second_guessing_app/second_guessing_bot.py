@@ -41,7 +41,7 @@ async def chat_gpt_agent(ctx: InteractionContext, **kwargs) -> None:
 @forum.agent
 async def hello_agent(ctx: InteractionContext) -> None:
     """An agent that sends a "hello" message."""
-    ctx.respond("hello", openai_role="assistant")
+    ctx.respond("Hello! How can I assist you today?", openai_role="assistant")
 
 
 async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
