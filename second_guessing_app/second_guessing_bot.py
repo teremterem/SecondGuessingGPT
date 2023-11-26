@@ -1,6 +1,7 @@
 """
 SecondGuessingGPT Telegram bot that uses AgentForum under the hood.
 """
+import asyncio
 import logging
 from typing import Any
 
@@ -72,8 +73,8 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         )
         if LATEST_FORUM_HASH_IN_TG_CHAT.get(tg_update.effective_chat.id)
         else None,
-        # model="gpt-4-1106-preview",
-        model="gpt-3.5-turbo-1106",
+        model="gpt-4-1106-preview",
+        # model="gpt-3.5-turbo-1106",
         stream=True,
     )
     chat_gpt_call.send_request(
@@ -85,13 +86,15 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         await send_forum_msg_to_telegram(response_promise, tg_update.effective_chat)
 
 
-async def send_forum_msg_to_telegram(msg_promise: MessagePromise, chat: tg.Chat) -> None:
+async def send_forum_msg_to_telegram(msg_promise: MessagePromise, tg_chat: tg.Chat) -> None:
     """
     Send a message from AgentForum to Telegram. Break it up into multiple Telegram messages based on the presence of
     double newlines.
     """
     tokens_so_far: list[str] = []
     tg_messages: list[tg.Message] = []
+
+    typing_task = asyncio.create_task(keep_typing(tg_chat))
 
     async for token in msg_promise:
         tokens_so_far.append(token.text)
@@ -104,19 +107,33 @@ async def send_forum_msg_to_telegram(msg_promise: MessagePromise, chat: tg.Chat)
         broken_up_content = content_so_far.rsplit("\n\n", 1)
         if len(broken_up_content) != 2:
             continue
+
+        typing_task.cancel()
+
         content_left, content_right = broken_up_content
 
         tokens_so_far = [content_right] if content_right else []
         if content_left.strip():
-            tg_messages.append(await chat.send_message(content_left))
+            tg_messages.append(await tg_chat.send_message(content_left))
+
+        typing_task = asyncio.create_task(keep_typing(tg_chat))
+
+    typing_task.cancel()
 
     remaining_content = "".join(tokens_so_far)
     if remaining_content.strip():
-        tg_messages.append(await chat.send_message(remaining_content))
+        tg_messages.append(await tg_chat.send_message(remaining_content))
 
     msg = await msg_promise.amaterialize()
     for tg_msg in tg_messages:
-        update_msg_forum_to_tg_mappings(msg.hash_key, tg_msg.message_id, chat.id)
+        update_msg_forum_to_tg_mappings(msg.hash_key, tg_msg.message_id, tg_chat.id)
+
+
+async def keep_typing(tg_chat: tg.Chat) -> None:
+    """Keep typing for up to two minutes at most."""
+    for _ in range(10):
+        await tg_chat.send_chat_action(tg.constants.ChatAction.TYPING)
+        await asyncio.sleep(10)
 
 
 def update_msg_forum_to_tg_mappings(forum_msg_hash, tg_msg_id: int, tg_chat_id) -> None:
