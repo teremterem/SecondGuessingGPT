@@ -8,22 +8,43 @@ from typing import Any
 import telegram as tg
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext, ConversationTracker
+from agentforum.models import Message, Freeform
 from agentforum.promises import MessagePromise
 from agentforum.storage import InMemoryStorage
 from telegram.ext import ApplicationBuilder
 
 from second_guessing_config import TELEGRAM_BOT_TOKEN, pl_async_openai_client
 
-logger = logging.getLogger(__name__)
+SLOW_OPENAI_MODEL = "gpt-4-1106-preview"
+# SLOW_OPENAI_MODEL = "gpt-3.5-turbo-1106"
+FAST_OPENAI_MODEL = "gpt-3.5-turbo-1106"
+
+FORUM_HASH_TO_TG_MSG_ID: dict[str, int] = {}
+TG_MSG_ID_TO_FORUM_HASH: dict[int, str] = {}
+LATEST_FORUM_HASH_IN_TG_CHAT: dict[int, str | None] = {}
 
 tg_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
 # TODO Oleksandr: it should be possible to instantiate Forum without passing any arguments (InMemoryStorage by default)
 forum = Forum(immutable_storage=InMemoryStorage())
 
-FORUM_HASH_TO_TG_MSG_ID: dict[str, int] = {}
-TG_MSG_ID_TO_FORUM_HASH: dict[int, str] = {}
-LATEST_FORUM_HASH_IN_TG_CHAT: dict[int, str | None] = {}
+logger = logging.getLogger(__name__)
+
+
+@forum.agent
+async def critic_agent(ctx: InteractionContext, **kwargs) -> None:
+    """An agent that uses OpenAI ChatGPT to criticize the way an assistant interacts with a user."""
+    # TODO Oleksandr: Introduce some kind of DetachedMessage that doesn't get "forwarded" when it becomes part of a
+    #  message tree ? Or maybe just start supporting plain dictionaries in openai_chat_completion() ?
+    system_msg = Message(
+        content="You are a critic. Your job is to criticize the assistant. Pick on the way it talks.",
+        sender_alias="Critic",  # TODO Oleksandr: I shouldn't have to worry about this field
+        metadata=Freeform(openai_role="system"),
+    )
+    full_chat = await ctx.request_messages.amaterialize_full_history()
+    ctx.respond(
+        openai_chat_completion(prompt=[system_msg, *full_chat], async_openai_client=pl_async_openai_client, **kwargs)
+    )
 
 
 @forum.agent
@@ -73,8 +94,7 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         )
         if LATEST_FORUM_HASH_IN_TG_CHAT.get(tg_update.effective_chat.id)
         else None,
-        model="gpt-4-1106-preview",
-        # model="gpt-3.5-turbo-1106",
+        model=SLOW_OPENAI_MODEL,
         stream=True,
     )
     chat_gpt_call.send_request(
@@ -85,8 +105,29 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
     async for response_promise in chat_gpt_call.finish():
         await send_forum_msg_to_telegram(response_promise, tg_update.effective_chat)
 
+    critic_responses = critic_agent.quick_call(
+        # TODO Oleksandr: rename .finish() to something that implies that it is "idempotent" (because it can be called
+        #  multiple times without side effects - agent processing will happen only once)
+        content=chat_gpt_call.finish(),
+        model=SLOW_OPENAI_MODEL,
+        # TODO Oleksandr: find a way to automatically decide if streaming is needed based on who is the final
+        #  receiver of the message ? how hard would that be to do that ?
+        stream=True,  # TODO Oleksandr: turn it off for critic when it is not talking to the user directly anymore
+    )
+    async for response_promise in critic_responses:
+        await send_forum_msg_to_telegram(
+            response_promise,
+            tg_update.effective_chat,
+            reply_to_tg_msg_id=FORUM_HASH_TO_TG_MSG_ID[
+                # TODO Oleksandr: introduce agent_call.amaterialize_concluding_response() ? + ..._all_responses() ?
+                (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
+            ],
+        )
 
-async def send_forum_msg_to_telegram(msg_promise: MessagePromise, tg_chat: tg.Chat) -> None:
+
+async def send_forum_msg_to_telegram(
+    msg_promise: MessagePromise, tg_chat: tg.Chat, reply_to_tg_msg_id: int | None = None
+) -> None:
     """
     Send a message from AgentForum to Telegram. Break it up into multiple Telegram messages based on the presence of
     double newlines.
@@ -95,6 +136,20 @@ async def send_forum_msg_to_telegram(msg_promise: MessagePromise, tg_chat: tg.Ch
     tg_messages: list[tg.Message] = []
 
     typing_task = asyncio.create_task(keep_typing(tg_chat))
+
+    async def send_tg_message(content: str) -> None:
+        """
+        Send a Telegram message. If `reply_to_tg_msg_id` is not None, then reply to the message with that ID and then
+        set `reply_to_tg_msg_id` to None to make sure that only the first message in the series of responses is a
+        reply.
+        """
+        nonlocal reply_to_tg_msg_id
+        if reply_to_tg_msg_id is None:
+            kwargs = {}
+        else:
+            kwargs = {"reply_to_message_id": reply_to_tg_msg_id}
+            reply_to_tg_msg_id = None
+        tg_messages.append(await tg_chat.send_message(content, **kwargs))
 
     async for token in msg_promise:
         tokens_so_far.append(token.text)
@@ -114,7 +169,7 @@ async def send_forum_msg_to_telegram(msg_promise: MessagePromise, tg_chat: tg.Ch
 
         tokens_so_far = [content_right] if content_right else []
         if content_left.strip():
-            tg_messages.append(await tg_chat.send_message(content_left))
+            await send_tg_message(content_left)
 
         typing_task = asyncio.create_task(keep_typing(tg_chat))
 
@@ -122,7 +177,7 @@ async def send_forum_msg_to_telegram(msg_promise: MessagePromise, tg_chat: tg.Ch
 
     remaining_content = "".join(tokens_so_far)
     if remaining_content.strip():
-        tg_messages.append(await tg_chat.send_message(remaining_content))
+        await send_tg_message(remaining_content)
 
     msg = await msg_promise.amaterialize()
     for tg_msg in tg_messages:
