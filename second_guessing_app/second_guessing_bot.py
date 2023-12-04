@@ -10,7 +10,6 @@ from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext, ConversationTracker
 from agentforum.models import Message, Freeform
 from agentforum.promises import MessagePromise
-from agentforum.storage import InMemoryStorage
 from telegram.ext import ApplicationBuilder
 
 from second_guessing_config import TELEGRAM_BOT_TOKEN, pl_async_openai_client
@@ -25,8 +24,7 @@ LATEST_FORUM_HASH_IN_TG_CHAT: dict[int, str | None] = {}
 
 tg_app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-# TODO Oleksandr: it should be possible to instantiate Forum without passing any arguments (InMemoryStorage by default)
-forum = Forum(immutable_storage=InMemoryStorage())
+forum = Forum()
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +37,7 @@ async def critic_agent(ctx: InteractionContext, **kwargs) -> None:
     system_msg = Message(
         content="You are a critic. Your job is to criticize the assistant. Pick on the way it talks.",
         sender_alias="Critic",  # TODO Oleksandr: I shouldn't have to worry about this field
+        # TODO Oleksandr: all the unrecognized fields passed to Message directly should be treated as metadata
         metadata=Freeform(openai_role="system"),
     )
     full_chat = await ctx.request_messages.amaterialize_full_history()
@@ -50,7 +49,7 @@ async def critic_agent(ctx: InteractionContext, **kwargs) -> None:
 @forum.agent
 async def chat_gpt_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT under the hood. It sends the full chat history to the OpenAI API."""
-    for request_msg in await ctx.request_messages.amaterialize_all():
+    for request_msg in await ctx.request_messages.amaterialize_as_list():
         # TODO Oleksandr: Support some sort of pre-/post-materialization hooks to decouple message to platform mapping
         #  from the agent logic ? When to set those hooks, though ? And what should be their scope ?
         update_msg_forum_to_tg_mappings(
@@ -79,8 +78,7 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         # TODO Oleksandr: Should it be possible to update the message tree (add new messages to its branches) without
         #  calling any agents ? Because right now I am forced to create a special agent that only says "hello". I
         #  could have just created this message here, without calling any agents.
-        hello_msg = await hello_agent.quick_call(None).amaterialize_concluding_message()
-        # TODO Oleksandr: it should be possible not to send None at all (`content` should be an optional kwarg)
+        hello_msg = await hello_agent.quick_call().amaterialize_concluding_message()
 
         tg_msg = await tg_update.effective_chat.send_message(hello_msg.content)
         update_msg_forum_to_tg_mappings(hello_msg.hash_key, tg_msg.message_id, tg_update.effective_chat.id)

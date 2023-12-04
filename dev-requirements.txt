@@ -75,13 +75,13 @@ fqdn==1.5.1
     # via jsonschema
 identify==2.5.32
     # via pre-commit
-idna==3.5
+idna==3.6
     # via
     #   -c requirements.txt
     #   anyio
     #   jsonschema
     #   requests
-ipykernel==6.26.0
+ipykernel==6.27.1
     # via jupyterlab
 ipython==8.18.0
     # via
@@ -108,7 +108,7 @@ jsonschema[format-nongpl]==4.20.0
     #   jupyter-events
     #   jupyterlab-server
     #   nbformat
-jsonschema-specifications==2023.11.1
+jsonschema-specifications==2023.11.2
     # via jsonschema
 jupyter-client==8.6.0
     # via
@@ -126,9 +126,9 @@ jupyter-core==5.5.0
     #   nbformat
 jupyter-events==0.9.0
     # via jupyter-server
-jupyter-lsp==2.2.0
+jupyter-lsp==2.2.1
     # via jupyterlab
-jupyter-server==2.10.1
+jupyter-server==2.11.2
     # via
     #   jupyter-lsp
     #   jupyterlab
@@ -158,7 +158,7 @@ mypy-extensions==1.0.0
     # via black
 nbclient==0.9.0
     # via nbconvert
-nbconvert==7.11.0
+nbconvert==7.12.0
     # via jupyter-server
 nbformat==5.9.2
     # via
@@ -192,7 +192,7 @@ pexpect==4.9.0
     # via ipython
 pip-tools==7.3.0
     # via -r dev-requirements.in
-platformdirs==4.0.0
+platformdirs==4.1.0
     # via
     #   black
     #   jupyter-core
@@ -237,7 +237,7 @@ pyzmq==25.1.1
     #   ipykernel
     #   jupyter-client
     #   jupyter-server
-referencing==0.31.0
+referencing==0.31.1
     # via
     #   jsonschema
     #   jsonschema-specifications
@@ -254,7 +254,7 @@ rfc3986-validator==0.1.1
     # via
     #   jsonschema
     #   jupyter-events
-rpds-py==0.13.1
+rpds-py==0.13.2
     # via
     #   jsonschema
     #   referencing
@@ -282,14 +282,14 @@ tinycss2==1.2.1
     # via nbconvert
 tomlkit==0.12.3
     # via pylint
-tornado==6.3.3
+tornado==6.4
     # via
     #   ipykernel
     #   jupyter-client
     #   jupyter-server
     #   jupyterlab
     #   terminado
-traitlets==5.13.0
+traitlets==5.14.0
     # via
     #   comm
     #   ipykernel
@@ -311,7 +311,7 @@ urllib3==2.1.0
     # via
     #   -c requirements.txt
     #   requests
-virtualenv==20.24.7
+virtualenv==20.25.0
     # via pre-commit
 wcwidth==0.2.12
     # via prompt-toolkit
@@ -321,9 +321,9 @@ webencodings==0.5.1
     # via
     #   bleach
     #   tinycss2
-websocket-client==1.6.4
+websocket-client==1.7.0
     # via jupyter-server
-wheel==0.41.3
+wheel==0.42.0
     # via pip-tools
 
 # The following packages are considered to be unsafe in a requirements file:
