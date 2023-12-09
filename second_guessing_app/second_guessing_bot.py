@@ -9,7 +9,6 @@ import telegram as tg
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext, ConversationTracker
 from agentforum.models import Message, Freeform
-from agentforum.promises import MessagePromise
 from telegram.ext import ApplicationBuilder
 
 from second_guessing_config import TELEGRAM_BOT_TOKEN, pl_async_openai_client
@@ -101,7 +100,13 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         tg_chat_id=tg_update.effective_chat.id,
     )
     async for response_promise in chat_gpt_call.finish():
-        await send_forum_msg_to_telegram(response_promise, tg_update.effective_chat)
+        await send_forum_msg_to_telegram.quick_call(
+            response_promise,
+            tg_chat_id=tg_update.effective_chat.id,
+            # TODO Oleksandr: MAJOR PROBLEM: agent calls are never awaited for if noone reads their responses - this
+            #  will definitely be hard to debug/understand for anyone who is not the author of this "feature" in the
+            #  framework
+        ).amaterialize_as_list()
 
     critic_responses = critic_agent.quick_call(
         # TODO Oleksandr: rename .finish() to something that implies that it is "idempotent" (because it can be called
@@ -113,9 +118,9 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         stream=True,  # TODO Oleksandr: turn it off for critic when it is not talking to the user directly anymore
     )
     async for response_promise in critic_responses:
-        await send_forum_msg_to_telegram(
+        send_forum_msg_to_telegram.quick_call(
             response_promise,
-            tg_update.effective_chat,
+            tg_chat_id=tg_update.effective_chat.id,
             reply_to_tg_msg_id=FORUM_HASH_TO_TG_MSG_ID[
                 # TODO Oleksandr: introduce agent_call.amaterialize_concluding_response() ? + ..._all_responses() ?
                 (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
@@ -123,23 +128,21 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         )
 
 
+@forum.agent
 async def send_forum_msg_to_telegram(
-    msg_promise: MessagePromise, tg_chat: tg.Chat, reply_to_tg_msg_id: int | None = None
+    ctx: InteractionContext, tg_chat_id: int = None, reply_to_tg_msg_id: int | None = None
 ) -> None:
+    # pylint: disable=too-many-locals
     """
     Send a message from AgentForum to Telegram. Break it up into multiple Telegram messages based on the presence of
     double newlines.
     """
-    tokens_so_far: list[str] = []
-    tg_messages: list[tg.Message] = []
 
-    typing_task = asyncio.create_task(keep_typing(tg_chat))
-
-    async def send_tg_message(content: str) -> None:
+    async def send_tg_message(content: str, _tg_messages: list[tg.Message]) -> None:
         """
-        Send a Telegram message. If `reply_to_tg_msg_id` is not None, then reply to the message with that ID and then
-        set `reply_to_tg_msg_id` to None to make sure that only the first message in the series of responses is a
-        reply.
+        Send a Telegram message. If `reply_to_tg_msg_id` is not None, then reply to the message with that ID and
+        then set `reply_to_tg_msg_id` to None to make sure that only the first message in the series of responses
+        is a reply.
         """
         nonlocal reply_to_tg_msg_id
         if reply_to_tg_msg_id is None:
@@ -147,49 +150,55 @@ async def send_forum_msg_to_telegram(
         else:
             kwargs = {"reply_to_message_id": reply_to_tg_msg_id}
             reply_to_tg_msg_id = None
-        tg_messages.append(await tg_chat.send_message(content, **kwargs))
+        _tg_messages.append(await tg_app.bot.send_message(chat_id=tg_chat_id, text=content, **kwargs))
 
-    async for token in msg_promise:
-        tokens_so_far.append(token.text)
-        content_so_far = "".join(tokens_so_far)
+    async for msg_promise in ctx.request_messages:
+        tokens_so_far: list[str] = []
+        tg_messages: list[tg.Message] = []  # TODO Oleksandr: get rid of this list
 
-        if content_so_far.count("```") % 2 == 1:
-            # we are in the middle of a code block, let's not break it
-            continue
+        typing_task = asyncio.create_task(keep_typing(tg_chat_id))
 
-        broken_up_content = content_so_far.rsplit("\n\n", 1)
-        if len(broken_up_content) != 2:
-            continue
+        async for token in msg_promise:
+            tokens_so_far.append(token.text)
+            content_so_far = "".join(tokens_so_far)
+
+            if content_so_far.count("```") % 2 == 1:
+                # we are in the middle of a code block, let's not break it
+                continue
+
+            broken_up_content = content_so_far.rsplit("\n\n", 1)
+            if len(broken_up_content) != 2:
+                continue
+
+            typing_task.cancel()
+
+            content_left, content_right = broken_up_content
+
+            tokens_so_far = [content_right] if content_right else []
+            if content_left.strip():
+                await send_tg_message(content_left, tg_messages)
+
+            typing_task = asyncio.create_task(keep_typing(tg_chat_id))
 
         typing_task.cancel()
 
-        content_left, content_right = broken_up_content
+        remaining_content = "".join(tokens_so_far)
+        if remaining_content.strip():
+            await send_tg_message(remaining_content, tg_messages)
 
-        tokens_so_far = [content_right] if content_right else []
-        if content_left.strip():
-            await send_tg_message(content_left)
-
-        typing_task = asyncio.create_task(keep_typing(tg_chat))
-
-    typing_task.cancel()
-
-    remaining_content = "".join(tokens_so_far)
-    if remaining_content.strip():
-        await send_tg_message(remaining_content)
-
-    msg = await msg_promise.amaterialize()
-    for tg_msg in tg_messages:
-        update_msg_forum_to_tg_mappings(msg.hash_key, tg_msg.message_id, tg_chat.id)
+        msg = await msg_promise.amaterialize()
+        for tg_msg in tg_messages:
+            update_msg_forum_to_tg_mappings(msg.hash_key, tg_msg.message_id, tg_chat_id)
 
 
-async def keep_typing(tg_chat: tg.Chat) -> None:
+async def keep_typing(tg_chat_id: int) -> None:
     """Keep typing for up to two minutes at most."""
     for _ in range(10):
-        await tg_chat.send_chat_action(tg.constants.ChatAction.TYPING)
+        await tg_app.bot.send_chat_action(chat_id=tg_chat_id, action=tg.constants.ChatAction.TYPING)
         await asyncio.sleep(10)
 
 
-def update_msg_forum_to_tg_mappings(forum_msg_hash, tg_msg_id: int, tg_chat_id) -> None:
+def update_msg_forum_to_tg_mappings(forum_msg_hash: str, tg_msg_id: int, tg_chat_id: int) -> None:
     """Update the mappings between forum message hashes and Telegram message IDs."""
     FORUM_HASH_TO_TG_MSG_ID[forum_msg_hash] = tg_msg_id
     TG_MSG_ID_TO_FORUM_HASH[tg_msg_id] = forum_msg_hash
