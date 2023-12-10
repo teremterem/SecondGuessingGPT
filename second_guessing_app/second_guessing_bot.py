@@ -84,6 +84,7 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         return
 
     chat_gpt_call = chat_gpt_agent.call(
+        # TODO Oleksandr: optionally allow passing `branch_from` directly
         conversation=ConversationTracker(
             forum=forum,
             # TODO Oleksandr: make it possible to pass bare message hash keys as MessageType ?
@@ -99,14 +100,22 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         tg_message_id=tg_update.effective_message.message_id,
         tg_chat_id=tg_update.effective_chat.id,
     )
-    async for response_promise in chat_gpt_call.finish():
-        await send_forum_msg_to_telegram.quick_call(
-            response_promise,
-            tg_chat_id=tg_update.effective_chat.id,
-            # TODO Oleksandr: MAJOR PROBLEM: agent calls are never awaited for if noone reads their responses - this
-            #  will definitely be hard to debug/understand for anyone who is not the author of this "feature" in the
-            #  framework
-        ).amaterialize_as_list()
+    sliced_responses = send_forum_msg_to_telegram.quick_call(
+        chat_gpt_call.finish(),
+        tg_chat_id=tg_update.effective_chat.id,
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        # TODO Oleksandr: MAJOR PROBLEM: agent calls are never awaited for if noone reads their responses - this
+        #  will definitely be hard to debug/understand for anyone who is not the author of this "feature" in the
+        #  framework
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+    )
+    async for sub_msg_promise in sliced_responses:
+        sub_msg = await sub_msg_promise.amaterialize()
+        update_msg_forum_to_tg_mappings(sub_msg.hash_key, sub_msg.metadata.tg_message_id, sub_msg.metadata.tg_chat_id)
 
     critic_responses = critic_agent.quick_call(
         # TODO Oleksandr: rename .finish() to something that implies that it is "idempotent" (because it can be called
@@ -117,15 +126,24 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
         #  receiver of the message ? how hard would that be to do that ?
         stream=True,  # TODO Oleksandr: turn it off for critic when it is not talking to the user directly anymore
     )
-    async for response_promise in critic_responses:
-        send_forum_msg_to_telegram.quick_call(
-            response_promise,
-            tg_chat_id=tg_update.effective_chat.id,
-            reply_to_tg_msg_id=FORUM_HASH_TO_TG_MSG_ID[
-                # TODO Oleksandr: introduce agent_call.amaterialize_concluding_response() ? + ..._all_responses() ?
-                (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
-            ],
-        )
+    sliced_responses = send_forum_msg_to_telegram.quick_call(
+        critic_responses,
+        tg_chat_id=tg_update.effective_chat.id,
+        reply_to_tg_msg_id=FORUM_HASH_TO_TG_MSG_ID[
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            # TODO Oleksandr: introduce agent_call.amaterialize_concluding_response() ? + ..._all_responses() ?
+            #  (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            # TODO TODO TODO TODO TODO TODO TODO TODO TODO
+            (await sliced_responses.amaterialize_concluding_message()).hash_key
+        ],
+    )
+    async for sub_msg_promise in sliced_responses:
+        sub_msg = await sub_msg_promise.amaterialize()
+        update_msg_forum_to_tg_mappings(sub_msg.hash_key, sub_msg.metadata.tg_message_id, sub_msg.metadata.tg_chat_id)
 
 
 @forum.agent
@@ -138,7 +156,7 @@ async def send_forum_msg_to_telegram(
     double newlines.
     """
 
-    async def send_tg_message(content: str, _tg_messages: list[tg.Message]) -> None:
+    async def send_tg_message(content: str) -> None:
         """
         Send a Telegram message. If `reply_to_tg_msg_id` is not None, then reply to the message with that ID and
         then set `reply_to_tg_msg_id` to None to make sure that only the first message in the series of responses
@@ -150,11 +168,16 @@ async def send_forum_msg_to_telegram(
         else:
             kwargs = {"reply_to_message_id": reply_to_tg_msg_id}
             reply_to_tg_msg_id = None
-        _tg_messages.append(await tg_app.bot.send_message(chat_id=tg_chat_id, text=content, **kwargs))
+        tg_message = await tg_app.bot.send_message(chat_id=tg_chat_id, text=content, **kwargs)
+        ctx.respond(
+            content,
+            tg_message_id=tg_message.message_id,
+            tg_chat_id=tg_chat_id,
+            openai_role="assistant",
+        )
 
     async for msg_promise in ctx.request_messages:
         tokens_so_far: list[str] = []
-        tg_messages: list[tg.Message] = []  # TODO Oleksandr: get rid of this list
 
         typing_task = asyncio.create_task(keep_typing(tg_chat_id))
 
@@ -176,7 +199,7 @@ async def send_forum_msg_to_telegram(
 
             tokens_so_far = [content_right] if content_right else []
             if content_left.strip():
-                await send_tg_message(content_left, tg_messages)
+                await send_tg_message(content_left)
 
             typing_task = asyncio.create_task(keep_typing(tg_chat_id))
 
@@ -184,11 +207,10 @@ async def send_forum_msg_to_telegram(
 
         remaining_content = "".join(tokens_so_far)
         if remaining_content.strip():
-            await send_tg_message(remaining_content, tg_messages)
+            await send_tg_message(remaining_content)
 
-        msg = await msg_promise.amaterialize()
-        for tg_msg in tg_messages:
-            update_msg_forum_to_tg_mappings(msg.hash_key, tg_msg.message_id, tg_chat_id)
+        # # TODO Oleksandr: what happens if I never materialize the original (full) message from openai ?
+        # await msg_promise.amaterialize()
 
 
 async def keep_typing(tg_chat_id: int) -> None:
@@ -200,6 +222,7 @@ async def keep_typing(tg_chat_id: int) -> None:
 
 def update_msg_forum_to_tg_mappings(forum_msg_hash: str, tg_msg_id: int, tg_chat_id: int) -> None:
     """Update the mappings between forum message hashes and Telegram message IDs."""
+    # TODO Oleksandr: use (tg_chat_id, tg_msg_id) tuple instead of just tg_msg_id in dictionaries below
     FORUM_HASH_TO_TG_MSG_ID[forum_msg_hash] = tg_msg_id
     TG_MSG_ID_TO_FORUM_HASH[tg_msg_id] = forum_msg_hash
     LATEST_FORUM_HASH_IN_TG_CHAT[tg_chat_id] = forum_msg_hash
