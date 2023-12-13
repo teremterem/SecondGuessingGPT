@@ -7,7 +7,7 @@ import logging
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, HttpResponseServerError
 
-from second_guessing_app.second_guessing_bot import handle_telegram_update
+from second_guessing_app.agents.tg_update_handler import handle_telegram_update
 from second_guessing_app.second_guessing_utils import csrf_exempt_async
 from second_guessing_config import TELEGRAM_WEBHOOK_TOKEN
 

@@ -6,8 +6,8 @@ import logging
 
 from django.apps import AppConfig
 
+from second_guessing_app.agents.forum import tg_app
 from second_guessing_config import DJANGO_BASE_URL, TELEGRAM_WEBHOOK_PATH, TELEGRAM_WEBHOOK_TOKEN
-from second_guessing_app.second_guessing_bot import tg_app
 
 logger = logging.getLogger(__name__)
 
