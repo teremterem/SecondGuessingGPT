@@ -5,18 +5,17 @@ message tree.
 """
 import asyncio
 
-from agentforum.forum import InteractionContext
+from agentforum.forum import InteractionContext, Agent
 
-from second_guessing_app.agents.forum import forum, tg_app, keep_typing
+from second_guessing_app.agents.forum import tg_app, keep_typing
 
 
-@forum.agent
 async def send_forum_msg_to_telegram(
-    # TODO Oleksandr: wrapped_agent: AgentFunction,
+    wrapped_agent: Agent,
     ctx: InteractionContext,
     tg_chat_id: int = None,
     reply_to_tg_msg_id: int | None = None,
-    # TODO Oleksandr: **kwargs,
+    **kwargs,
 ) -> None:
     # pylint: disable=too-many-locals
     """
@@ -37,14 +36,6 @@ async def send_forum_msg_to_telegram(
             kwargs = {"reply_to_message_id": reply_to_tg_msg_id}
             reply_to_tg_msg_id = None
         tg_message = await tg_app.bot.send_message(chat_id=tg_chat_id, text=content, **kwargs)
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO Oleksandr: somehow responses from this agent should NOT go after the request messages in the message
-        #  tree, but as a branch that is parallel to the request messages branch ?
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
-        # TODO TODO TODO TODO TODO TODO TODO TODO TODO
         ctx.respond(
             content,
             tg_message_id=tg_message.message_id,
@@ -52,7 +43,7 @@ async def send_forum_msg_to_telegram(
             openai_role="assistant",
         )
 
-    async for msg_promise in ctx.request_messages:
+    async for msg_promise in wrapped_agent.quick_call(ctx.request_messages, **kwargs):
         tokens_so_far: list[str] = []
 
         typing_task = asyncio.create_task(keep_typing(tg_chat_id))
