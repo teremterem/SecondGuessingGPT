@@ -78,19 +78,16 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
     # TODO Oleksandr: MAJOR PROBLEM: agent calls are never awaited for if no one reads their responses - this
     #  will definitely be hard to debug/understand for anyone who is not the author of this "feature" in the
     #  framework - fix this by emphasizing this in the docstring of .quick_call() and .call() ?
-    async for sub_msg_promise in chat_gpt_call.finish():
+    async for sub_msg_promise in chat_gpt_call.response_sequence():
         sub_msg = await sub_msg_promise.amaterialize()
         update_msg_forum_to_tg_mappings(sub_msg.hash_key, sub_msg.metadata.tg_message_id, sub_msg.metadata.tg_chat_id)
 
     critic_responses = critic_agent.quick_call(
-        # TODO Oleksandr: rename .finish() to something that implies that it is "idempotent" (because it can be called
-        #  multiple times without side effects - agent processing will happen only once)
-        content=chat_gpt_call.finish(),
+        content=chat_gpt_call.response_sequence(),
         tg_chat_id=tg_update.effective_chat.id,
         reply_to_tg_msg_id=FORUM_HASH_TO_TG_MSG_ID[
             # TODO Oleksandr: introduce agent_call.amaterialize_concluding_response() ? + ..._all_responses() ?
-            #  (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
-            (await chat_gpt_call.finish().amaterialize_concluding_message()).hash_key
+            (await chat_gpt_call.response_sequence().amaterialize_concluding_message()).hash_key
         ],
         model=SLOW_OPENAI_MODEL,
         # TODO Oleksandr: find a way to automatically decide if streaming is needed based on who is the final

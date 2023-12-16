@@ -33,6 +33,7 @@ async def keep_typing(tg_chat_id: int) -> None:
 def update_msg_forum_to_tg_mappings(forum_msg_hash: str, tg_msg_id: int, tg_chat_id: int) -> None:
     """Update the mappings between forum message hashes and Telegram message IDs."""
     # TODO Oleksandr: use (tg_chat_id, tg_msg_id) tuple instead of just tg_msg_id in dictionaries below
+    # TODO Oleksandr: find a way to ALWAYS attach Telegram ids to messages as metadata ?
     FORUM_HASH_TO_TG_MSG_ID[forum_msg_hash] = tg_msg_id
     TG_MSG_ID_TO_FORUM_HASH[tg_msg_id] = forum_msg_hash
     LATEST_FORUM_HASH_IN_TG_CHAT[tg_chat_id] = forum_msg_hash
