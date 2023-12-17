@@ -8,6 +8,7 @@ import asyncio
 import readline  # pylint: disable=unused-import
 import warnings
 
+import pypdf
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -40,10 +41,28 @@ list is a number or a string.\
 @forum.agent
 async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT under the hood. It sends the full chat history to the OpenAI API."""
+    reader = pypdf.PdfReader("../733-1496-1-SM.pdf")
+    pdf_text = "\n".join([page.extract_text() for page in reader.pages])
+
+    # with pdfplumber.open("../733-1496-1-SM.pdf") as pdf:
+    #     pdf_text = "\n".join([page.extract_text() for page in pdf.pages])
+
     full_chat = await ctx.request_messages.amaterialize_full_history()
     prompt = [
         {
             "content": GAIA_SYSTEM_PROMPT,
+            "role": "system",
+        },
+        {
+            "content": "In order to answer the question use the following content of a PDF document:",
+            "role": "system",
+        },
+        {
+            "content": pdf_text,
+            "role": "user",
+        },
+        {
+            "content": "HERE GOES THE QUESTION:",
             "role": "system",
         },
         *full_chat,
@@ -53,6 +72,7 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
 
 async def main() -> None:
     """Run the assistant."""
+
     question = (
         "What was the volume in m^3 of the fish bag that was calculated in the University of Leicester paper "
         '"Can Hiccup Supply Enough Fish to Maintain a Dragon’s Diet?"'
