@@ -20,7 +20,6 @@ warnings.filterwarnings("ignore", module="pydantic")
 
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext
-from agentforum.models import Message, Freeform
 
 forum = Forum()
 async_openai_client = promptlayer.openai.AsyncOpenAI()
@@ -42,16 +41,14 @@ list is a number or a string.\
 async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT under the hood. It sends the full chat history to the OpenAI API."""
     full_chat = await ctx.request_messages.amaterialize_full_history()
-    full_chat.insert(
-        0,
-        # TODO Oleksandr: should be possible to mix messages with plain openai chat dicts ?
-        Message(
-            content=GAIA_SYSTEM_PROMPT,
-            sender_alias=ctx.this_agent.agent_alias,
-            metadata=Freeform(openai_role="system"),
-        ),
-    )
-    ctx.respond(openai_chat_completion(prompt=full_chat, async_openai_client=async_openai_client, **kwargs))
+    prompt = [
+        {
+            "content": GAIA_SYSTEM_PROMPT,
+            "role": "system",
+        },
+        *full_chat,
+    ]
+    ctx.respond(openai_chat_completion(prompt=prompt, async_openai_client=async_openai_client, **kwargs))
 
 
 async def main() -> None:
