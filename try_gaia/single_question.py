@@ -1,32 +1,16 @@
-# pylint: disable=wrong-import-position
 """
 Try out a question from the GAIA dataset.
 """
-import asyncio
+import json
+import os
+from pprint import pprint
 
-# noinspection PyUnresolvedReferences
-import readline  # pylint: disable=unused-import
-import warnings
-
-import pypdf
-from dotenv import load_dotenv
-from langchain import hub
-from langchain.agents import AgentExecutor, load_tools
-from langchain.agents.format_scratchpad import format_log_to_str
-from langchain.agents.output_parsers import ReActSingleInputOutputParser
-from langchain.tools.render import render_text_description
-
-load_dotenv()
-
-from langchain.chat_models import PromptLayerChatOpenAI
 import promptlayer
-
-# TODO Oleksandr: get rid of this warning suppression when PromptLayer doesn't produce "Expected Choice but got dict"
-#  warning anymore
-warnings.filterwarnings("ignore", module="pydantic")
-
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext
+from serpapi import GoogleSearch
+
+from try_gaia.captured_serpapi_result import CAPTURED_SERPAPI_RESULT
 
 forum = Forum()
 async_openai_client = promptlayer.openai.AsyncOpenAI()
@@ -46,37 +30,23 @@ list is a number or a string.\
 
 @forum.agent
 async def pdf_finder_agent(ctx: InteractionContext) -> None:
-    """Langchain based attempt."""
-    llm = PromptLayerChatOpenAI(temperature=0, model_name="gpt-4-1106-preview")
-    tools = load_tools(["serpapi"], llm=llm)
-    prompt = hub.pull("hwchase17/react")
-    prompt = prompt.partial(
-        tools=render_text_description(tools),
-        tool_names=", ".join([t.name for t in tools]),
-    )
-    llm_with_stop = llm.bind(stop=["\nObservation"])
-    agent = (
+    """Call SerpAPI directly."""
+    query = (await ctx.request_messages.amaterialize_concluding_message()).content
+    search = GoogleSearch(
         {
-            "input": lambda x: x["input"],
-            "agent_scratchpad": lambda x: format_log_to_str(x["intermediate_steps"]),
-        }
-        | prompt
-        | llm_with_stop
-        | ReActSingleInputOutputParser()
-    )
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, max_iterations=3)
-    agent_executor.invoke(
-        {
-            "input": (await ctx.request_messages.amaterialize_concluding_message()).content,
+            "q": query,
+            "api_key": os.environ["SERPAPI_API_KEY"],
         }
     )
+    result = search.get_dict()
+    pprint(result)
 
 
 @forum.agent
 async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT under the hood. It sends the full chat history to the OpenAI API."""
-    reader = pypdf.PdfReader("../733-1496-1-SM.pdf")
-    pdf_text = "\n".join([page.extract_text() for page in reader.pages])
+    # reader = pypdf.PdfReader("../733-1496-1-SM.pdf")
+    # pdf_text = "\n".join([page.extract_text() for page in reader.pages])
 
     # with pdfplumber.open("../733-1496-1-SM.pdf") as pdf:
     #     pdf_text = "\n".join([page.extract_text() for page in pdf.pages])
@@ -88,11 +58,12 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
             "role": "system",
         },
         {
-            "content": "In order to answer the question use the following content of a PDF document:",
+            # "content": "In order to answer the question use the following content of a PDF document:",
+            "content": "In order to answer the question use the following data:",
             "role": "system",
         },
         {
-            "content": pdf_text,
+            "content": json.dumps(CAPTURED_SERPAPI_RESULT),
             "role": "user",
         },
         {
@@ -101,7 +72,16 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
         },
         *full_chat,
     ]
-    ctx.respond(openai_chat_completion(prompt=prompt, async_openai_client=async_openai_client, **kwargs))
+    ctx.respond(
+        openai_chat_completion(
+            prompt=prompt,
+            async_openai_client=async_openai_client,
+            model="gpt-4-1106-preview",
+            # model="gpt-3.5-turbo-1106",
+            temperature=0,
+            **kwargs,
+        )
+    )
 
 
 async def main() -> None:
@@ -113,14 +93,8 @@ async def main() -> None:
     )
     print("\nQUESTION:", question)
 
-    # assistant_responses = gaia_agent.quick_call(
-    #     question,
-    #     model="gpt-4-1106-preview",
-    #     # model="gpt-3.5-turbo-1106",
-    #     temperature=0,
-    #     stream=True,
-    # )
-    assistant_responses = pdf_finder_agent.quick_call(question)
+    assistant_responses = gaia_agent.quick_call(question, stream=True)
+    # assistant_responses = pdf_finder_agent.quick_call(question)
 
     async for response in assistant_responses:
         print("\n\033[1m\033[36mGPT: ", end="", flush=True)
@@ -128,7 +102,3 @@ async def main() -> None:
             print(token.text, end="", flush=True)
         print("\033[0m")
     print()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
