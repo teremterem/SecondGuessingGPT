@@ -135,7 +135,7 @@ jupyter-client==8.6.0
     #   ipykernel
     #   jupyter-server
     #   nbclient
-jupyter-core==5.5.0
+jupyter-core==5.5.1
     # via
     #   ipykernel
     #   jupyter-client
@@ -185,7 +185,7 @@ mypy-extensions==1.0.0
     #   black
 nbclient==0.9.0
     # via nbconvert
-nbconvert==7.12.0
+nbconvert==7.13.0
     # via jupyter-server
 nbformat==5.9.2
     # via
