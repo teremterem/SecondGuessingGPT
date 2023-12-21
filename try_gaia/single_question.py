@@ -3,14 +3,11 @@ Try out a question from the GAIA dataset.
 """
 import json
 import os
-from pprint import pprint
 
 import promptlayer
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext
 from serpapi import GoogleSearch
-
-from try_gaia.captured_serpapi_result import CAPTURED_SERPAPI_RESULT
 
 forum = Forum()
 async_openai_client = promptlayer.openai.AsyncOpenAI()
@@ -27,19 +24,61 @@ If you are asked for a comma separated list, apply the above rules depending of 
 list is a number or a string.\
 """
 
+SEARCH_PROMPT = """\
+Answer the following questions as best you can. You have access to the following tools:
+
+Search: A search engine. Useful for when you need to answer questions about current events. Input should be a \
+search query.
+
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [Search]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question
+
+Begin!\
+"""
+
 
 @forum.agent
 async def pdf_finder_agent(ctx: InteractionContext) -> None:
     """Call SerpAPI directly."""
-    query = (await ctx.request_messages.amaterialize_concluding_message()).content
+    # TODO Oleksandr: find a prompt format that allows full chat history to be passed
+    last_message = (await ctx.request_messages.amaterialize_concluding_message()).content.strip()
+    prompt = [
+        {
+            "content": SEARCH_PROMPT,
+            "role": "system",
+        },
+        {
+            "content": f"Question: {last_message}\nThought:",
+            "role": "user",
+        },
+    ]
+    query_msg = openai_chat_completion(  # TODO Oleksandr: turn this into a "partial" method
+        prompt=prompt,
+        async_openai_client=async_openai_client,
+        model="gpt-4-1106-preview",
+        # model="gpt-3.5-turbo-1106",
+        temperature=0,
+    )
+    # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
+    query_msg_content = "".join([token.text async for token in query_msg])
+    # get a substring that goes after "Action Input:"
+    query = query_msg_content.split("Action Input:")[1].strip()
+
     search = GoogleSearch(
         {
             "q": query,
             "api_key": os.environ["SERPAPI_API_KEY"],
         }
     )
-    result = search.get_dict()
-    pprint(result)
+    ctx.respond(json.dumps(search.get_dict()))
 
 
 @forum.agent
@@ -51,7 +90,6 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
     # with pdfplumber.open("../733-1496-1-SM.pdf") as pdf:
     #     pdf_text = "\n".join([page.extract_text() for page in pdf.pages])
 
-    full_chat = await ctx.request_messages.amaterialize_full_history()
     prompt = [
         {
             "content": GAIA_SYSTEM_PROMPT,
@@ -63,17 +101,20 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
             "role": "system",
         },
         {
-            "content": json.dumps(CAPTURED_SERPAPI_RESULT),
+            "content": (
+                await pdf_finder_agent.quick_call(ctx.request_messages).amaterialize_concluding_message()
+            ).content,
             "role": "user",
         },
         {
             "content": "HERE GOES THE QUESTION:",
             "role": "system",
         },
-        *full_chat,
+        # TODO Oleksandr: should be possible to just send ctx.request_messages instead of *...
+        *await ctx.request_messages.amaterialize_full_history(),
     ]
     ctx.respond(
-        openai_chat_completion(
+        openai_chat_completion(  # TODO Oleksandr: turn this into a "partial" method
             prompt=prompt,
             async_openai_client=async_openai_client,
             model="gpt-4-1106-preview",
