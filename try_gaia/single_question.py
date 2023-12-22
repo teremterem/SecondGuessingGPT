@@ -24,17 +24,19 @@ If you are asked for a comma separated list, apply the above rules depending of 
 list is a number or a string.\
 """
 
-SEARCH_PROMPT = """\
+SEARCH_PDF_PROMPT = """\
 Answer the following questions as best you can. You have access to the following tools:
 
-Search: A search engine. Useful for when you need to answer questions about current events. Input should be a \
-search query.
+FindPDF: Much like a search engine but finds and returns from the internet PDFs that satisfy a search query. Useful \
+when the information needed to answer a question is more likely to be found in some kind of PDF document rather than \
+a webpage. Input should be a search query. (NOTE: FindPDF already knows that its job is to look for PDFs, so you \
+shouldn’t include the word “PDF” in your query.)
 
 Use the following format:
 
 Question: the input question you must answer
 Thought: you should always think about what to do
-Action: the action to take, should be one of [Search]
+Action: the action to take, should be one of [FindPDF]
 Action Input: the input to the action
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
@@ -52,7 +54,7 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
     last_message = (await ctx.request_messages.amaterialize_concluding_message()).content.strip()
     prompt = [
         {
-            "content": SEARCH_PROMPT,
+            "content": SEARCH_PDF_PROMPT,
             "role": "system",
         },
         {
@@ -66,11 +68,16 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
         model="gpt-4-1106-preview",
         # model="gpt-3.5-turbo-1106",
         temperature=0,
+        stop="\nObservation:",
     )
     # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
     query_msg_content = "".join([token.text async for token in query_msg])
     # get a substring that goes after "Action Input:"
-    query = query_msg_content.split("Action Input:")[1].strip()
+    query = query_msg_content.split("Action Input:")[1]
+    observation_pos = query.find("Observation:")
+    if observation_pos != -1:
+        query = query[:observation_pos]
+    query = query.strip()
 
     search = GoogleSearch(
         {
