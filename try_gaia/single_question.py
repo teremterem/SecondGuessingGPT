@@ -3,6 +3,7 @@ Try out a question from the GAIA dataset.
 """
 import json
 import os
+from functools import partial
 
 import promptlayer
 from agentforum.ext.llms.openai import openai_chat_completion
@@ -47,6 +48,15 @@ Begin!\
 """
 
 
+gpt4_completion = partial(
+    openai_chat_completion,
+    async_openai_client=async_openai_client,
+    model="gpt-4-1106-preview",
+    # model="gpt-3.5-turbo-1106",
+    temperature=0,
+)
+
+
 @forum.agent
 async def pdf_finder_agent(ctx: InteractionContext) -> None:
     """Call SerpAPI directly."""
@@ -62,14 +72,8 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "role": "user",
         },
     ]
-    query_msg = openai_chat_completion(  # TODO Oleksandr: turn this into a "partial" method
-        prompt=prompt,
-        async_openai_client=async_openai_client,
-        model="gpt-4-1106-preview",
-        # model="gpt-3.5-turbo-1106",
-        temperature=0,
-        stop="\nObservation:",
-    )
+    query_msg = gpt4_completion(prompt=prompt, stop="\nObservation:")
+
     # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
     query_msg_content = "".join([token.text async for token in query_msg])
     # get a substring that goes after "Action Input:"
@@ -120,16 +124,7 @@ async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
         # TODO Oleksandr: should be possible to just send ctx.request_messages instead of *...
         *await ctx.request_messages.amaterialize_full_history(),
     ]
-    ctx.respond(
-        openai_chat_completion(  # TODO Oleksandr: turn this into a "partial" method
-            prompt=prompt,
-            async_openai_client=async_openai_client,
-            model="gpt-4-1106-preview",
-            # model="gpt-3.5-turbo-1106",
-            temperature=0,
-            **kwargs,
-        )
-    )
+    ctx.respond(gpt4_completion(prompt=prompt, **kwargs))
 
 
 async def main() -> None:
