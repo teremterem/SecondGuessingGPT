@@ -5,6 +5,7 @@ import json
 import os
 from functools import partial
 
+import httpx
 import promptlayer
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext
@@ -114,7 +115,11 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "role": "system",
         },
     ]
-    ctx.respond(gpt4_completion(prompt=prompt, stop="\nObservation:"))
+    url_msg = gpt4_completion(prompt=prompt)
+    # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
+    page_url = "".join([token.text async for token in url_msg]).strip()
+    page = (await httpx.AsyncClient().get(page_url)).text
+    ctx.respond(page)
 
 
 @forum.agent
