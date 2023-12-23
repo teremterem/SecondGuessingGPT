@@ -47,6 +47,11 @@ Final Answer: the final answer to the original input question
 Begin!\
 """
 
+EXTRACT_URL_PROMPT = """\
+Your name is FindPDF. You will be provided with a SerpAPI JSON response that contains a list of search results for \
+a given user query. The user is looking for a PDF document. Your job is to extract the URL that, in your opinion, \
+is the most likely to contain the PDF document the user is looking for.\
+"""
 
 gpt4_completion = partial(
     openai_chat_completion,
@@ -89,7 +94,27 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "api_key": os.environ["SERPAPI_API_KEY"],
         }
     )
-    ctx.respond(json.dumps(search.get_dict()))
+    organic_results = search.get_dict()["organic_results"]
+
+    prompt = [
+        {
+            "content": EXTRACT_URL_PROMPT,
+            "role": "system",
+        },
+        {
+            "content": f"USER QUERY: {query}\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
+            "role": "user",
+        },
+        {
+            "content": f"SERPAPI SEARCH RESULTS: {json.dumps(organic_results)}",
+            "role": "user",
+        },
+        {
+            "content": "PLEASE ONLY RETURN A URL AND NO OTHER TEXT.\n\nURL:",
+            "role": "system",
+        },
+    ]
+    ctx.respond(gpt4_completion(prompt=prompt, stop="\nObservation:"))
 
 
 @forum.agent
@@ -136,8 +161,8 @@ async def main() -> None:
     )
     print("\nQUESTION:", question)
 
-    assistant_responses = gaia_agent.quick_call(question, stream=True)
-    # assistant_responses = pdf_finder_agent.quick_call(question)
+    # assistant_responses = gaia_agent.quick_call(question, stream=True)
+    assistant_responses = pdf_finder_agent.quick_call(question)
 
     async for response in assistant_responses:
         print("\n\033[1m\033[36mGPT: ", end="", flush=True)
