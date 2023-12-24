@@ -1,12 +1,14 @@
 """
 Try out a question from the GAIA dataset.
 """
+import io
 import json
 import os
 from functools import partial
 
 import httpx
 import promptlayer
+import pypdf
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import Forum, InteractionContext
 from serpapi import GoogleSearch
@@ -114,48 +116,50 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
         },
     ]
     page_url = (await gpt4_completion(prompt=prompt).amaterialize_content()).strip()
-    page = (await httpx.AsyncClient().get(page_url)).text
 
-    prompt = [
-        {
-            "content": EXTRACT_URL_FROM_PAGE_PROMPT,
-            "role": "system",
-        },
-        {
-            "content": f"USER QUERY: {query}\n\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
-            "role": "user",
-        },
-        {
-            "content": f"PAGE CONTENT:\n\n{page}",
-            "role": "user",
-        },
-        {
-            "content": "PLEASE ONLY RETURN A URL AND NO OTHER TEXT.\n\nURL:",
-            "role": "system",
-        },
-    ]
-    page_url = (await gpt4_completion(prompt=prompt).amaterialize_content()).strip()
-    # page = (await httpx.AsyncClient().get(page_url)).text
-    ctx.respond(page_url)
+    for _ in range(5):
+        httpx_response = await httpx.AsyncClient().get(page_url)
+        # check if mimetype is pdf
+        if httpx_response.headers["content-type"] == "application/pdf":
+            break
+
+        prompt = [
+            {
+                "content": EXTRACT_URL_FROM_PAGE_PROMPT,
+                "role": "system",
+            },
+            {
+                "content": f"USER QUERY: {query}\n\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
+                "role": "user",
+            },
+            {
+                "content": f"PAGE CONTENT:\n\n{httpx_response.text}",
+                "role": "user",
+            },
+            {
+                "content": "PLEASE ONLY RETURN A URL AND NO OTHER TEXT.\n\nURL:",
+                "role": "system",
+            },
+        ]
+        page_url = (await gpt4_completion(prompt=prompt).amaterialize_content()).strip()
+    else:
+        raise RuntimeError("Could not find a PDF document.")  # TODO Oleksandr: custom exception ?
+
+    pdf_reader = pypdf.PdfReader(io.BytesIO(httpx_response.content))
+    pdf_text = "\n".join([page.extract_text() for page in pdf_reader.pages])
+    ctx.respond(pdf_text)
 
 
 @forum.agent
 async def gaia_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT under the hood. It sends the full chat history to the OpenAI API."""
-    # reader = pypdf.PdfReader("../733-1496-1-SM.pdf")
-    # pdf_text = "\n".join([page.extract_text() for page in reader.pages])
-
-    # with pdfplumber.open("../733-1496-1-SM.pdf") as pdf:
-    #     pdf_text = "\n".join([page.extract_text() for page in pdf.pages])
-
     prompt = [
         {
             "content": GAIA_SYSTEM_PROMPT,
             "role": "system",
         },
         {
-            # "content": "In order to answer the question use the following content of a PDF document:",
-            "content": "In order to answer the question use the following data:",
+            "content": "In order to answer the question use the following content of a PDF document:",
             "role": "system",
         },
         {
@@ -183,8 +187,7 @@ async def main() -> None:
     )
     print("\nQUESTION:", question)
 
-    # assistant_responses = gaia_agent.quick_call(question, stream=True)
-    assistant_responses = pdf_finder_agent.quick_call(question)
+    assistant_responses = gaia_agent.quick_call(question, stream=True)
 
     async for response in assistant_responses:
         print("\n\033[1m\033[36mGPT: ", end="", flush=True)
