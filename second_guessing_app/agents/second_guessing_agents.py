@@ -5,7 +5,6 @@ import logging
 
 from agentforum.ext.llms.openai import openai_chat_completion
 from agentforum.forum import InteractionContext
-from agentforum.models import Message, Freeform
 
 from second_guessing_app.agents.forum import forum, update_msg_forum_to_tg_mappings
 from second_guessing_config import pl_async_openai_client
@@ -16,18 +15,15 @@ logger = logging.getLogger(__name__)
 @forum.agent
 async def critic_agent(ctx: InteractionContext, **kwargs) -> None:
     """An agent that uses OpenAI ChatGPT to criticize the way an assistant interacts with a user."""
-    # TODO Oleksandr: Introduce some kind of DetachedMessage that doesn't get "forwarded" when it becomes part of a
-    #  message tree ? Or maybe just start supporting plain dictionaries in openai_chat_completion() ?
-    system_msg = Message(
-        content="You are a critic. Your job is to criticize the assistant. Pick on the way it talks.",
-        sender_alias="Critic",  # TODO Oleksandr: I shouldn't have to worry about this field
-        # TODO Oleksandr: all the unrecognized fields passed to Message directly should be treated as metadata
-        metadata=Freeform(openai_role="system"),
-    )
     full_chat = await ctx.request_messages.amaterialize_full_history()
-    ctx.respond(
-        openai_chat_completion(prompt=[system_msg, *full_chat], async_openai_client=pl_async_openai_client, **kwargs)
-    )
+    prompt = [
+        {
+            "content": "You are a critic. Your job is to criticize the assistant. Pick on the way it talks.",
+            "role": "system",
+        },
+        *full_chat,
+    ]
+    ctx.respond(openai_chat_completion(prompt=prompt, async_openai_client=pl_async_openai_client, **kwargs))
 
 
 @forum.agent
