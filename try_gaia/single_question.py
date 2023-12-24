@@ -50,8 +50,14 @@ Begin!\
 
 EXTRACT_URL_PROMPT = """\
 Your name is FindPDF. You will be provided with a SerpAPI JSON response that contains a list of search results for \
-a given user query. The user is looking for a PDF document. Your job is to extract the URL that, in your opinion, \
+a given user query. The user is looking for a PDF document. Your job is to extract a URL that, in your opinion, \
 is the most likely to contain the PDF document the user is looking for.\
+"""
+
+EXTRACT_URL_FROM_PAGE_PROMPT = """\
+Your name is FindPDF. You will be provided with the content of a web page that was found via web search with a \
+given user query. The user is looking for a PDF document. Your job is to extract from this web page a URL that, in \
+your opinion, is the most likely to lead to the PDF document the user is looking for.\
 """
 
 gpt4_completion = partial(
@@ -78,16 +84,8 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "role": "user",
         },
     ]
-    query_msg = gpt4_completion(prompt=prompt, stop="\nObservation:")
-
-    # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
-    query_msg_content = "".join([token.text async for token in query_msg])
-    # get a substring that goes after "Action Input:"
-    query = query_msg_content.split("Action Input:")[1]
-    observation_pos = query.find("Observation:")
-    if observation_pos != -1:
-        query = query[:observation_pos]
-    query = query.strip()
+    query_msg_content = await gpt4_completion(prompt=prompt, stop="\nObservation:").amaterialize_content()
+    query = query_msg_content.split("Action Input:")[1].strip()
 
     search = GoogleSearch(
         {
@@ -103,7 +101,7 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "role": "system",
         },
         {
-            "content": f"USER QUERY: {query}\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
+            "content": f"USER QUERY: {query}\n\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
             "role": "user",
         },
         {
@@ -115,11 +113,30 @@ async def pdf_finder_agent(ctx: InteractionContext) -> None:
             "role": "system",
         },
     ]
-    url_msg = gpt4_completion(prompt=prompt)
-    # TODO Oleksandr: this is awkward, support StreamedMessage's own amaterialize ?
-    page_url = "".join([token.text async for token in url_msg]).strip()
+    page_url = (await gpt4_completion(prompt=prompt).amaterialize_content()).strip()
     page = (await httpx.AsyncClient().get(page_url)).text
-    ctx.respond(page)
+
+    prompt = [
+        {
+            "content": EXTRACT_URL_FROM_PAGE_PROMPT,
+            "role": "system",
+        },
+        {
+            "content": f"USER QUERY: {query}\n\nTHE ORIGINAL QUESTION THIS QUERY WAS DERIVED FROM: {last_message}",
+            "role": "user",
+        },
+        {
+            "content": f"PAGE CONTENT:\n\n{page}",
+            "role": "user",
+        },
+        {
+            "content": "PLEASE ONLY RETURN A URL AND NO OTHER TEXT.\n\nURL:",
+            "role": "system",
+        },
+    ]
+    page_url = (await gpt4_completion(prompt=prompt).amaterialize_content()).strip()
+    # page = (await httpx.AsyncClient().get(page_url)).text
+    ctx.respond(page_url)
 
 
 @forum.agent
