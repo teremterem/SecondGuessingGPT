@@ -6,7 +6,6 @@ from functools import partial, wraps
 from typing import Any
 
 import telegram as tg
-from agentforum.forum import ConversationTracker
 
 from second_guessing_app.agents.forum import (
     update_msg_forum_to_tg_mappings,
@@ -59,12 +58,8 @@ async def handle_telegram_update(tg_update_dict: dict[str, Any]) -> None:
 
     chat_gpt_call = chat_gpt_agent.call(
         tg_chat_id=tg_update.effective_chat.id,
-        # TODO Oleksandr: optionally allow passing `branch_from` directly
-        conversation=ConversationTracker(
-            forum=forum,
-            # TODO Oleksandr: make it possible to pass bare message hash keys as MessageType ?
-            branch_from=await forum.afind_message_promise(LATEST_FORUM_HASH_IN_TG_CHAT[tg_update.effective_chat.id]),
-        )
+        # TODO Oleksandr: make it possible to pass bare message hash keys as MessageType ?
+        branch_from=await forum.afind_message_promise(LATEST_FORUM_HASH_IN_TG_CHAT[tg_update.effective_chat.id])
         if LATEST_FORUM_HASH_IN_TG_CHAT.get(tg_update.effective_chat.id)
         else None,
         model=SLOW_OPENAI_MODEL,
